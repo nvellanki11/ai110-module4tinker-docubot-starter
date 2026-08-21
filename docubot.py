@@ -9,6 +9,7 @@ Core DocuBot class responsible for:
 
 import os
 import glob
+import re
 
 class DocuBot:
     def __init__(self, docs_folder="docs", llm_client=None):
@@ -48,9 +49,11 @@ class DocuBot:
     # Index Construction (Phase 1)
     # -----------------------------------------------------------
 
+    def _tokenize(self, text):
+        return re.findall(r"[a-z0-9]+", text.lower())
+
     def build_index(self, documents):
         """
-        TODO (Phase 1):
         Build a tiny inverted index mapping lowercase words to the documents
         they appear in.
 
@@ -59,12 +62,11 @@ class DocuBot:
             "token": ["AUTH.md", "API_REFERENCE.md"],
             "database": ["DATABASE.md"]
         }
-
-        Keep this simple: split on whitespace, lowercase tokens,
-        ignore punctuation if needed.
         """
         index = {}
-        # TODO: implement simple indexing
+        for filename, text in documents:
+            for word in set(self._tokenize(text)):
+                index.setdefault(word, []).append(filename)
         return index
 
     # -----------------------------------------------------------
@@ -73,47 +75,97 @@ class DocuBot:
 
     def score_document(self, query, text):
         """
-        TODO (Phase 1):
-        Return a simple relevance score for how well the text matches the query.
-
-        Suggested baseline:
-        - Convert query into lowercase words
-        - Count how many appear in the text
-        - Return the count as the score
+        Return a simple relevance score for how well the text matches the query:
+        count how many times each query word appears in the text.
         """
-        # TODO: implement scoring
-        return 0
+        query_words = self._tokenize(query)
+        text_words = self._tokenize(text)
+
+        score = 0
+        for word in query_words:
+            score += text_words.count(word)
+        return score
 
     def retrieve(self, query, top_k=3):
         """
-        TODO (Phase 1):
-        Use the index and scoring function to select top_k relevant document snippets.
-
-        Return a list of (filename, text) sorted by score descending.
+        Score every document against the query and return the top_k
+        (filename, text) pairs sorted by score descending, skipping
+        documents that scored 0 (no overlap with the query).
         """
-        results = []
-        # TODO: implement retrieval logic
+        scored = []
+        for filename, text in self.documents:
+            score = self.score_document(query, text)
+            if score > 0:
+                scored.append((score, filename, text))
+
+        scored.sort(key=lambda item: item[0], reverse=True)
+        results = [(filename, text) for _, filename, text in scored]
         return results[:top_k]
 
     # -----------------------------------------------------------
     # Answering Modes
     # -----------------------------------------------------------
 
-    def answer_retrieval_only(self, query, top_k=3):
+    def _excerpt(self, query, text, max_chars=220):
+        """
+        Return a short, single-paragraph excerpt of text centered on the
+        first query word found, instead of the full document.
+        """
+        lower_text = text.lower()
+        match_pos = -1
+        for word in self._tokenize(query):
+            pos = lower_text.find(word)
+            if pos != -1 and (match_pos == -1 or pos < match_pos):
+                match_pos = pos
+
+        start = max(0, match_pos - max_chars // 2) if match_pos != -1 else 0
+        snippet = " ".join(text[start:start + max_chars].split())
+
+        prefix = "..." if start > 0 else ""
+        suffix = "..." if start + max_chars < len(text) else ""
+        return f"{prefix}{snippet}{suffix}"
+
+    def _confidence(self, query, text):
+        """
+        Fraction of distinct query words that appear anywhere in text.
+        Used as a guardrail so a single incidental word match doesn't
+        count as a real answer.
+        """
+        query_words = set(self._tokenize(query))
+        if not query_words:
+            return 0.0
+
+        text_words = set(self._tokenize(text))
+        matched = query_words & text_words
+        return len(matched) / len(query_words)
+
+    def answer_retrieval_only(self, query, top_k=3, min_confidence=0.5):
         """
         Phase 1 retrieval only mode.
-        Returns raw snippets and filenames with no LLM involved.
+        Returns a concise, numbered list of short excerpts (not full
+        documents) with no LLM involved.
+
+        Guardrail: a document only counts as a match if at least
+        min_confidence of the query's distinct words actually appear in
+        it. Otherwise we refuse rather than show a weak, likely
+        irrelevant excerpt.
         """
         snippets = self.retrieve(query, top_k=top_k)
+        confident_snippets = [
+            (filename, text)
+            for filename, text in snippets
+            if self._confidence(query, text) >= min_confidence
+        ]
 
-        if not snippets:
+        if not confident_snippets:
             return "I do not know based on these docs."
 
         formatted = []
-        for filename, text in snippets:
-            formatted.append(f"[{filename}]\n{text}\n")
+        for i, (filename, text) in enumerate(confident_snippets, start=1):
+            excerpt = self._excerpt(query, text)
+            formatted.append(f"{i}. {filename}\n   {excerpt}")
 
-        return "\n---\n".join(formatted)
+        return "\n\n".join(formatted)
 
     def answer_rag(self, query, top_k=3):
         """

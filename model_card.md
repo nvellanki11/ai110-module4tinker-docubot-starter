@@ -15,16 +15,16 @@ Use clear, honest descriptions. It is fine if your system is imperfect.
 **What is DocuBot trying to do?**  
 Describe the overall goal in 2 to 3 sentences.
 
-> _Your answer here._
+DocuBot acts as a chatbot for users unfamiliar to a system, answering questions using 3 different retrieval methods
 
 **What inputs does DocuBot take?**  
 For example: user question, docs in folder, environment variables.
 
-> _Your answer here._
+Takes in an option for retrieval method (1-3, or q) and user questions.
 
 **What outputs does DocuBot produce?**
 
-> _Your answer here._
+A textual response to the user question, or to sample queries
 
 ---
 
