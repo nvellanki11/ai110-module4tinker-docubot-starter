@@ -109,10 +109,20 @@ def print_eval_results(hit_rate, results):
 # -----------------------------------------------------------
 
 if __name__ == "__main__":
+    from dotenv import load_dotenv
+    load_dotenv()
+
     from docubot import DocuBot
+    from llm_client import GeminiClient
 
     print("Running retrieval evaluation...\n")
-    bot = DocuBot()
 
-    hit_rate, results = evaluate_retrieval(bot)
-    print_eval_results(hit_rate, results)
+    try:
+        llm_client = GeminiClient()
+    except RuntimeError as exc:
+        print(f"Cannot run evaluation: {exc}")
+        print("Retrieval now relies on Gemini embeddings, so GEMINI_API_KEY must be set.")
+    else:
+        bot = DocuBot(llm_client=llm_client)
+        hit_rate, results = evaluate_retrieval(bot)
+        print_eval_results(hit_rate, results)

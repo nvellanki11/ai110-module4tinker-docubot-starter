@@ -26,7 +26,7 @@ def try_create_llm_client():
     except RuntimeError as exc:
         print("Warning: LLM features are disabled.")
         print(f"Reason: {exc}")
-        print("You can still run retrieval only mode.\n")
+        print("Retrieval now relies on Gemini embeddings too, so it is unavailable as well.\n")
         return None, False
 
 
@@ -40,7 +40,10 @@ def choose_mode(has_llm):
         print("  1) Naive LLM over full docs (no retrieval)")
     else:
         print("  1) Naive LLM over full docs (unavailable, no GEMINI_API_KEY)")
-    print("  2) Retrieval only (no LLM)")
+    if has_llm:
+        print("  2) Retrieval only (vector search, no generation)")
+    else:
+        print("  2) Retrieval only (unavailable, no GEMINI_API_KEY; retrieval uses Gemini embeddings)")
     if has_llm:
         print("  3) RAG (retrieval + LLM)")
     else:
@@ -91,11 +94,16 @@ def run_naive_llm_mode(bot, has_llm):
         print()
 
 
-def run_retrieval_only_mode(bot):
+def run_retrieval_only_mode(bot, has_llm):
     """
     Mode 2:
-    Retrieval only answers. No LLM involved.
+    Retrieval only answers (vector search). No generation involved, but
+    an LLM client is still required to compute embeddings.
     """
+    if not has_llm or bot.llm_client is None:
+        print("\nRetrieval mode is not available (no GEMINI_API_KEY; retrieval uses Gemini embeddings).\n")
+        return
+
     queries, label = get_query_or_use_samples()
     print(f"\nRunning retrieval only mode on {label}...\n")
 
@@ -145,7 +153,7 @@ def main():
         elif choice == "1":
             run_naive_llm_mode(bot, has_llm)
         elif choice == "2":
-            run_retrieval_only_mode(bot)
+            run_retrieval_only_mode(bot, has_llm)
         elif choice == "3":
             run_rag_mode(bot, has_llm)
         else:

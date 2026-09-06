@@ -4,6 +4,7 @@ Gemini client wrapper used by DocuBot.
 Handles:
 - Configuring the Gemini client from the GEMINI_API_KEY environment variable
 - Naive "generation only" answers over the full docs corpus (Phase 0)
+- Text embeddings used for vector retrieval (Phase 1)
 - RAG style answers that use only retrieved snippets (Phase 2)
 
 Experiment with:
@@ -18,6 +19,9 @@ from google import genai
 # Central place to update the model name if needed.
 # You can swap this for a different Gemini model in the future.
 GEMINI_MODEL_NAME = "gemma-4-31b-it"
+
+# Text-only embedding model used to build the vector retrieval index.
+EMBEDDING_MODEL_NAME = "gemini-embedding-001"
 
 
 class GeminiClient:
@@ -40,6 +44,30 @@ class GeminiClient:
             )
 
         self.client = genai.Client(api_key=api_key)
+
+    # -----------------------------------------------------------
+    # Phase 1: embeddings for vector retrieval
+    # -----------------------------------------------------------
+
+    def embed_text(self, text):
+        """
+        Returns the embedding vector (a list of floats) for a single
+        piece of text, used by DocuBot to build and query its vector
+        index.
+
+        Raises RuntimeError if the embedding call fails, since callers
+        have no fallback without a vector to compare against.
+        """
+        try:
+            result = self.client.models.embed_content(
+                model=EMBEDDING_MODEL_NAME,
+                contents=text
+            )
+            return result.embeddings[0].values
+        except Exception as e:
+            raise RuntimeError(
+                f"Unable to generate embedding. ({type(e).__name__}: {e})"
+            ) from e
 
     # -----------------------------------------------------------
     # Phase 0: naive generation over full docs

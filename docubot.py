@@ -1,8 +1,8 @@
 """
 Core DocuBot class responsible for:
 - Loading documents from the docs/ folder
-- Building a simple retrieval index (Phase 1)
-- Retrieving relevant snippets (Phase 1)
+- Building a vector retrieval index via Gemini embeddings (Phase 1)
+- Retrieving relevant snippets by cosine similarity (Phase 1)
 - Supporting retrieval only answers
 - Supporting RAG answers when paired with Gemini (Phase 2)
 """
@@ -10,12 +10,15 @@ Core DocuBot class responsible for:
 import os
 import glob
 import re
+import math
 
 class DocuBot:
     def __init__(self, docs_folder="docs", llm_client=None):
         """
         docs_folder: directory containing project documentation files
-        llm_client: optional Gemini client for LLM based answers
+        llm_client: Gemini client used both for LLM answers and for
+            computing the embeddings that back vector retrieval. Without
+            it, no index can be built and retrieve() returns nothing.
         """
         self.docs_folder = docs_folder
         self.llm_client = llm_client
@@ -23,7 +26,7 @@ class DocuBot:
         # Load documents into memory
         self.documents = self.load_documents()  # List of (filename, text)
 
-        # Build a retrieval index (implemented in Phase 1)
+        # Build a vector index (implemented in Phase 1)
         self.index = self.build_index(self.documents)
 
     # -----------------------------------------------------------
@@ -54,53 +57,72 @@ class DocuBot:
 
     def build_index(self, documents):
         """
-        Build a tiny inverted index mapping lowercase words to the documents
-        they appear in.
+        Build a vector index: one Gemini embedding per document.
 
-        Example structure:
-        {
-            "token": ["AUTH.md", "API_REFERENCE.md"],
-            "database": ["DATABASE.md"]
-        }
+        Returns a list of (filename, text, embedding) tuples. Embeddings
+        require an llm_client, so without one the index is empty and
+        retrieve() has nothing to compare against.
+
+        A single document that fails to embed (rate limit, transient
+        network error) is skipped with a warning rather than aborting
+        construction and losing every other document's embedding.
         """
-        index = {}
+        if self.llm_client is None:
+            return []
+
+        index = []
         for filename, text in documents:
-            for word in set(self._tokenize(text)):
-                index.setdefault(word, []).append(filename)
+            try:
+                embedding = self.llm_client.embed_text(text)
+            except RuntimeError as e:
+                print(f"Warning: skipping {filename} in retrieval index ({e})")
+                continue
+            index.append((filename, text, embedding))
         return index
 
     # -----------------------------------------------------------
     # Scoring and Retrieval (Phase 1)
     # -----------------------------------------------------------
 
-    def score_document(self, query, text):
+    def score_document(self, query_embedding, doc_embedding):
         """
-        Return a simple relevance score for how well the text matches the query:
-        count how many times each query word appears in the text.
+        Cosine similarity between a query embedding and a document
+        embedding. Ranges from -1 to 1; higher means more semantically
+        similar.
         """
-        query_words = self._tokenize(query)
-        text_words = self._tokenize(text)
+        dot = sum(x * y for x, y in zip(query_embedding, doc_embedding))
+        query_norm = math.sqrt(sum(x * x for x in query_embedding))
+        doc_norm = math.sqrt(sum(y * y for y in doc_embedding))
 
-        score = 0
-        for word in query_words:
-            score += text_words.count(word)
-        return score
+        if query_norm == 0 or doc_norm == 0:
+            return 0.0
+        return dot / (query_norm * doc_norm)
+
+    def retrieve_with_scores(self, query, top_k=3):
+        """
+        Embed the query, score every document by cosine similarity
+        against its embedding, and return the top_k
+        (score, filename, text) tuples sorted by similarity descending.
+        """
+        if not self.index:
+            return []
+
+        query_embedding = self.llm_client.embed_text(query)
+
+        scored = [
+            (self.score_document(query_embedding, embedding), filename, text)
+            for filename, text, embedding in self.index
+        ]
+        scored.sort(key=lambda item: item[0], reverse=True)
+        return scored[:top_k]
 
     def retrieve(self, query, top_k=3):
         """
         Score every document against the query and return the top_k
-        (filename, text) pairs sorted by score descending, skipping
-        documents that scored 0 (no overlap with the query).
+        (filename, text) pairs sorted by similarity descending.
         """
-        scored = []
-        for filename, text in self.documents:
-            score = self.score_document(query, text)
-            if score > 0:
-                scored.append((score, filename, text))
-
-        scored.sort(key=lambda item: item[0], reverse=True)
-        results = [(filename, text) for _, filename, text in scored]
-        return results[:top_k]
+        scored = self.retrieve_with_scores(query, top_k=top_k)
+        return [(filename, text) for _, filename, text in scored]
 
     # -----------------------------------------------------------
     # Answering Modes
@@ -125,36 +147,22 @@ class DocuBot:
         suffix = "..." if start + max_chars < len(text) else ""
         return f"{prefix}{snippet}{suffix}"
 
-    def _confidence(self, query, text):
-        """
-        Fraction of distinct query words that appear anywhere in text.
-        Used as a guardrail so a single incidental word match doesn't
-        count as a real answer.
-        """
-        query_words = set(self._tokenize(query))
-        if not query_words:
-            return 0.0
-
-        text_words = set(self._tokenize(text))
-        matched = query_words & text_words
-        return len(matched) / len(query_words)
-
-    def answer_retrieval_only(self, query, top_k=3, min_confidence=0.5):
+    def answer_retrieval_only(self, query, top_k=3, min_similarity=0.6):
         """
         Phase 1 retrieval only mode.
         Returns a concise, numbered list of short excerpts (not full
         documents) with no LLM involved.
 
-        Guardrail: a document only counts as a match if at least
-        min_confidence of the query's distinct words actually appear in
-        it. Otherwise we refuse rather than show a weak, likely
-        irrelevant excerpt.
+        Guardrail: a document only counts as a match if its cosine
+        similarity to the query embedding is at least min_similarity.
+        Otherwise we refuse rather than show a weak, likely irrelevant
+        excerpt.
         """
-        snippets = self.retrieve(query, top_k=top_k)
+        scored = self.retrieve_with_scores(query, top_k=top_k)
         confident_snippets = [
             (filename, text)
-            for filename, text in snippets
-            if self._confidence(query, text) >= min_confidence
+            for score, filename, text in scored
+            if score >= min_similarity
         ]
 
         if not confident_snippets:
