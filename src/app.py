@@ -21,7 +21,7 @@ from dataset import SAMPLE_QUERIES
 def load_bot():
     """
     Builds the GeminiClient and DocuBot once per server process. Cached
-    because embedding the whole docs/ folder on every rerun would be slow
+    because embedding the whole corpus/ folder on every rerun would be slow
     and burn API quota.
     """
     try:

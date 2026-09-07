@@ -1,7 +1,7 @@
 """
 Optional helper module containing:
 - SAMPLE_QUERIES used during the activity
-- FALLBACK_DOCS, an in memory documentation corpus used if the docs/ folder
+- FALLBACK_DOCS, an in memory documentation corpus used if the corpus/ folder
   is missing or cannot be loaded
 """
 
@@ -22,7 +22,7 @@ SAMPLE_QUERIES = [
 
 # -----------------------------------------------------------
 # Optional fallback documentation corpus
-# Used only if docs/ directory is missing.
+# Used only if corpus/ directory is missing.
 # -----------------------------------------------------------
 
 FALLBACK_DOCS = {
@@ -79,6 +79,6 @@ Run the server using python app.py.
 def load_fallback_documents():
     """
     Returns FALLBACK_DOCS as a list of (filename, text) tuples.
-    Provided as a helper for environments where no docs/ folder is available.
+    Provided as a helper for environments where no corpus/ folder is available.
     """
     return list(FALLBACK_DOCS.items())

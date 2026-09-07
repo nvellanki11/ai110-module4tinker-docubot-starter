@@ -12,7 +12,15 @@ It can operate in three different modes:
 3. **RAG mode (Retrieval Augmented Generation)**  
    Retrieves relevant snippets, then asks Gemini to answer using only those snippets.
 
-The docs folder contains realistic developer documents (API reference, authentication notes, database notes), but these files are **just text**. They support retrieval experiments and do not require students to set up any backend systems.
+The `corpus/` folder contains realistic developer documents (API reference, authentication notes, database notes), but these files are **just text**. They support retrieval experiments and do not require set up of any backend systems.
+
+---
+
+## Architecture
+
+See [documentation/ARCHITECTURE.md](documentation/ARCHITECTURE.md) for a diagram of how a developer question flows through all three modes:
+
+![DocuBot architecture diagram](documentation/images/architecture.png)
 
 ---
 
@@ -40,7 +48,7 @@ If you do not set a Gemini key, you can still run retrieval only mode.
 
 Start the program:
 
-    python main.py
+    python src/main.py
 
 Choose a mode:
 
@@ -54,7 +62,7 @@ You can use built in sample queries or type your own.
 
 ## Running Retrieval Evaluation (optional)
 
-    python evaluation.py
+    python src/evaluation.py
 
 This prints simple retrieval hit rates for sample queries.
 
@@ -64,13 +72,13 @@ This prints simple retrieval hit rates for sample queries.
 
 You will primarily work in:
 
-- `docubot.py`  
+- `src/docubot.py`  
   Implement or improve the retrieval index, scoring, and snippet selection.
 
-- `llm_client.py`  
+- `src/llm_client.py`  
   Adjust the prompts and behavior of LLM responses.
 
-- `dataset.py`  
+- `src/dataset.py`  
   Add or change sample queries for testing.
 
 ---

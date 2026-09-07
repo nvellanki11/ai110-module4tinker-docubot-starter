@@ -20,6 +20,9 @@ venv/
 .cache/
 *.cache/
 
+# DocuBot embedding cache
+.embedding_cache.json
+
 # VS Code
 .vscode/
 

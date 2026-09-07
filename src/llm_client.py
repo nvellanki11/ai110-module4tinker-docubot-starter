@@ -18,7 +18,7 @@ from google import genai
 
 # Central place to update the model name if needed.
 # You can swap this for a different Gemini model in the future.
-GEMINI_MODEL_NAME = "gemma-4-31b-it"
+GEMINI_MODEL_NAME = "gemini-3.6-flash"
 
 # Text-only embedding model used to build the vector retrieval index.
 EMBEDDING_MODEL_NAME = "gemini-embedding-001"
@@ -58,15 +58,26 @@ class GeminiClient:
         Raises RuntimeError if the embedding call fails, since callers
         have no fallback without a vector to compare against.
         """
+        return self.embed_texts([text])[0]
+
+    def embed_texts(self, texts):
+        """
+        Returns embedding vectors for a batch of texts in one API call,
+        used when building the retrieval index so DocuBot doesn't pay a
+        network round-trip per chunk.
+
+        Raises RuntimeError if the embedding call fails, since callers
+        have no fallback without vectors to compare against.
+        """
         try:
             result = self.client.models.embed_content(
                 model=EMBEDDING_MODEL_NAME,
-                contents=text
+                contents=texts
             )
-            return result.embeddings[0].values
+            return [embedding.values for embedding in result.embeddings]
         except Exception as e:
             raise RuntimeError(
-                f"Unable to generate embedding. ({type(e).__name__}: {e})"
+                f"Unable to generate embeddings. ({type(e).__name__}: {e})"
             ) from e
 
     # -----------------------------------------------------------

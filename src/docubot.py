@@ -1,6 +1,6 @@
 """
 Core DocuBot class responsible for:
-- Loading documents from the docs/ folder
+- Loading documents from the corpus/ folder
 - Splitting documents into overlapping sliding-window chunks
 - Building a vector retrieval index via Gemini embeddings (Phase 1)
 - Retrieving relevant chunks by cosine similarity (Phase 1)
@@ -12,6 +12,8 @@ import os
 import glob
 import re
 import math
+import json
+import hashlib
 
 class DocuBot:
     # Sliding-window chunking parameters (characters). The window needs to
@@ -23,7 +25,12 @@ class DocuBot:
     CHUNK_SIZE = 1000
     CHUNK_OVERLAP = 200
 
-    def __init__(self, docs_folder="docs", llm_client=None):
+    # Where per-chunk embeddings are cached across runs, keyed by a hash
+    # of the chunk text so edited docs simply miss the cache instead of
+    # returning a stale embedding.
+    EMBEDDING_CACHE_PATH = ".embedding_cache.json"
+
+    def __init__(self, docs_folder="corpus", llm_client=None):
         """
         docs_folder: directory containing project documentation files
         llm_client: Gemini client used both for LLM answers and for
@@ -90,6 +97,25 @@ class DocuBot:
             start += stride
         return chunks
 
+    def _chunk_hash(self, chunk):
+        return hashlib.sha256(chunk.encode("utf8")).hexdigest()
+
+    def _load_embedding_cache(self):
+        """
+        Loads the on-disk {chunk_hash: embedding} cache. Missing or
+        corrupt cache files are treated as an empty cache rather than
+        raising, since the cache is purely a speed optimization.
+        """
+        try:
+            with open(self.EMBEDDING_CACHE_PATH, "r", encoding="utf8") as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {}
+
+    def _save_embedding_cache(self, cache):
+        with open(self.EMBEDDING_CACHE_PATH, "w", encoding="utf8") as f:
+            json.dump(cache, f)
+
     def build_index(self, documents):
         """
         Build a vector index: one Gemini embedding per chunk, where each
@@ -102,22 +128,50 @@ class DocuBot:
         Embeddings require an llm_client, so without one the index is
         empty and retrieve() has nothing to compare against.
 
-        A single chunk that fails to embed (rate limit, transient network
+        Embeddings are cached on disk by chunk-text hash, so unchanged
+        chunks are free to reload on subsequent runs instead of making a
+        fresh Gemini API call every startup. Chunks that do need
+        embedding are sent to the API in a single batched call rather
+        than one request per chunk, since each request is a network
+        round-trip.
+
+        A chunk that fails to embed (rate limit, transient network
         error) is skipped with a warning rather than aborting construction
         and losing every other chunk's embedding.
         """
         if self.llm_client is None:
             return []
 
-        index = []
+        cache = self._load_embedding_cache()
+
+        # entries: (filename, chunk, chunk_hash, cached_embedding_or_None)
+        entries = []
         for filename, text in documents:
             for chunk in self._chunk_text(text):
-                try:
-                    embedding = self.llm_client.embed_text(chunk)
-                except RuntimeError as e:
-                    print(f"Warning: skipping a chunk of {filename} in retrieval index ({e})")
-                    continue
-                index.append((filename, chunk, embedding))
+                chunk_hash = self._chunk_hash(chunk)
+                entries.append((filename, chunk, chunk_hash, cache.get(chunk_hash)))
+
+        misses = [e for e in entries if e[3] is None]
+        if misses:
+            miss_texts = [chunk for _, chunk, _, _ in misses]
+            try:
+                embeddings = self.llm_client.embed_texts(miss_texts)
+            except RuntimeError as e:
+                print(f"Warning: batch embedding failed, skipping {len(misses)} chunk(s) ({e})")
+                embeddings = None
+
+            if embeddings is not None:
+                for (filename, chunk, chunk_hash, _), embedding in zip(misses, embeddings):
+                    cache[chunk_hash] = embedding
+                self._save_embedding_cache(cache)
+
+        index = []
+        for filename, chunk, chunk_hash, embedding in entries:
+            embedding = cache.get(chunk_hash, embedding)
+            if embedding is None:
+                continue
+            index.append((filename, chunk, embedding))
+
         return index
 
     # -----------------------------------------------------------

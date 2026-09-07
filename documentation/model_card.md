@@ -68,7 +68,7 @@ Summarize the rules from your prompt. For example: only use snippets, say "I do 
 
 Run the **same set of queries** in all three modes. Fill in the table with short notes.
 
-You can reuse or adapt the queries from `dataset.py`.
+You can reuse or adapt the queries from `src/dataset.py`.
 
 | Query | Naive LLM: helpful or harmful? | Retrieval only: helpful or harmful? | RAG: helpful or harmful? | Notes |
 |------|---------------------------------|--------------------------------------|---------------------------|-------|
